@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 
-// Connect the GPS RX/TX to arduino pins 3 and 5
+// Connect the GPS RX/TX to arduino pins 2 and 3
 SoftwareSerial serial = SoftwareSerial(2,3);
 
 const unsigned char UBX_HEADER[] = { 0xB5, 0x62 };
