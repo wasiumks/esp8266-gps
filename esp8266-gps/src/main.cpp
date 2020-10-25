@@ -1,89 +1,157 @@
-#include <Arduino.h>
+#include <TinyGPS++.h>
 #include <SoftwareSerial.h>
+/*
+   This sample code demonstrates the normal use of a TinyGPS++ (TinyGPSPlus) object.
+   It requires the use of SoftwareSerial, and assumes that you have a
+   4800-baud serial GPS device hooked up on pins 4(rx) and 3(tx).
+*/
+static const int RXPin = 3, TXPin = 2;
+static const uint32_t GPSBaud = 115200;
 
-// Connect the GPS RX/TX to arduino pins 2 and 3
-SoftwareSerial serial = SoftwareSerial(2,3);
+// The TinyGPS++ object
+TinyGPSPlus gps;
 
-const unsigned char UBX_HEADER[] = { 0xB5, 0x62 };
+// The serial connection to the GPS device
+SoftwareSerial ss(RXPin, TXPin);
 
-struct NAV_POSLLH {
-  unsigned char cls;
-  unsigned char id;
-  unsigned short len;
-  unsigned long iTOW;
-  long lon;
-  long lat;
-  long height;
-  long hMSL;
-  unsigned long hAcc;
-  unsigned long vAcc;
-};
+void setup()
+{
+  Serial.begin(115200);
+  ss.begin(GPSBaud);
 
-NAV_POSLLH posllh;
-
-void calcChecksum(unsigned char* CK) {
-  memset(CK, 0, 2);
-  for (int i = 0; i < (int)sizeof(NAV_POSLLH); i++) {
-    CK[0] += ((unsigned char*)(&posllh))[i];
-    CK[1] += CK[0];
-  }
+  Serial.println(F("FullExample.ino"));
+  Serial.println(F("An extensive example of many interesting TinyGPS++ features"));
+  Serial.print(F("Testing TinyGPS++ library v. ")); Serial.println(TinyGPSPlus::libraryVersion());
+  Serial.println(F("by Mikal Hart"));
+  Serial.println();
+  Serial.println(F("Sats HDOP  Latitude   Longitude   Fix  Date       Time     Date Alt    Course Speed Card  Distance Course Card  Chars Sentences Checksum"));
+  Serial.println(F("           (deg)      (deg)       Age                      Age  (m)    --- from GPS ----  ---- to London  ----  RX    RX        Fail"));
+  Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------"));
+}
+// This custom version of delay() ensures that the gps object
+// is being "fed".
+static void smartDelay(unsigned long ms)
+{
+  unsigned long start = millis();
+  do 
+  {
+    while (ss.available())
+      gps.encode(ss.read());
+  } while (millis() - start < ms);
 }
 
-bool processGPS() {
-  static int fpos = 0;
-  static unsigned char checksum[2];
-  const int payloadSize = sizeof(NAV_POSLLH);
-
-  while ( serial.available() ) {
-    byte c = serial.read();
-    if ( fpos < 2 ) {
-      if ( c == UBX_HEADER[fpos] )
-        fpos++;
-      else
-        fpos = 0;
-    }
-    else {
-      if ( (fpos-2) < payloadSize )
-        ((unsigned char*)(&posllh))[fpos-2] = c;
-
-      fpos++;
-
-      if ( fpos == (payloadSize+2) ) {
-        calcChecksum(checksum);
-      }
-      else if ( fpos == (payloadSize+3) ) {
-        if ( c != checksum[0] )
-          fpos = 0;
-      }
-      else if ( fpos == (payloadSize+4) ) {
-        fpos = 0;
-        if ( c == checksum[1] ) {
-          return true;
-        }
-      }
-      else if ( fpos > (payloadSize+4) ) {
-        fpos = 0;
-      }
-    }
+static void printFloat(float val, bool valid, int len, int prec)
+{
+  if (!valid)
+  {
+    while (len-- > 1)
+      Serial.print('*');
+    Serial.print(' ');
   }
-  return false;
+  else
+  {
+    Serial.print(val, prec);
+    int vi = abs((int)val);
+    int flen = prec + (val < 0.0 ? 2 : 1); // . and -
+    flen += vi >= 1000 ? 4 : vi >= 100 ? 3 : vi >= 10 ? 2 : 1;
+    for (int i=flen; i<len; ++i)
+      Serial.print(' ');
+  }
+  smartDelay(0);
 }
 
-void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(9600);
-  serial.begin(9600);
+static void printInt(unsigned long val, bool valid, int len)
+{
+  char sz[32] = "*****************";
+  if (valid)
+    sprintf(sz, "%ld", val);
+  sz[len] = 0;
+  for (int i=strlen(sz); i<len; ++i)
+    sz[i] = ' ';
+  if (len > 0) 
+    sz[len-1] = ' ';
+  Serial.print(sz);
+  smartDelay(0);
 }
 
-void loop() {
-  // put your main code here, to run repeatedly:
-  if ( processGPS() ) {
-    Serial.print("iTOW:");      Serial.print(posllh.iTOW);
-    Serial.print(" lat/lon: "); Serial.print(posllh.lat/10000000.0f); Serial.print(","); Serial.print(posllh.lon/10000000.0f);
-    Serial.print(" height: ");  Serial.print(posllh.height/1000.0f);
-    Serial.print(" hMSL: ");    Serial.print(posllh.hMSL/1000.0f);
-    Serial.print(" hAcc: ");    Serial.print(posllh.hAcc/1000.0f);
-    Serial.print(" vAcc: ");    Serial.print(posllh.vAcc/1000.0f);
-    Serial.println();
+static void printDateTime(TinyGPSDate &d, TinyGPSTime &t)
+{
+  if (!d.isValid())
+  {
+    Serial.print(F("********** "));
   }
+  else
+  {
+    char sz[32];
+    sprintf(sz, "%02d/%02d/%02d ", d.month(), d.day(), d.year());
+    Serial.print(sz);
+  }
+  
+  if (!t.isValid())
+  {
+    Serial.print(F("******** "));
+  }
+  else
+  {
+    char sz[32];
+    sprintf(sz, "%02d:%02d:%02d ", t.hour(), t.minute(), t.second());
+    Serial.print(sz);
+  }
+
+  printInt(d.age(), d.isValid(), 5);
+  smartDelay(0);
+}
+
+static void printStr(const char *str, int len)
+{
+  int slen = strlen(str);
+  for (int i=0; i<len; ++i)
+    Serial.print(i<slen ? str[i] : ' ');
+  smartDelay(0);
+}
+void loop()
+{
+  static const double LONDON_LAT = 51.508131, LONDON_LON = -0.128002;
+
+  printInt(gps.satellites.value(), gps.satellites.isValid(), 5);
+  printFloat(gps.hdop.hdop(), gps.hdop.isValid(), 6, 1);
+  printFloat(gps.location.lat(), gps.location.isValid(), 11, 6);
+  printFloat(gps.location.lng(), gps.location.isValid(), 12, 6);
+  printInt(gps.location.age(), gps.location.isValid(), 5);
+  printDateTime(gps.date, gps.time);
+  printFloat(gps.altitude.meters(), gps.altitude.isValid(), 7, 2);
+  printFloat(gps.course.deg(), gps.course.isValid(), 7, 2);
+  printFloat(gps.speed.kmph(), gps.speed.isValid(), 6, 2);
+  printStr(gps.course.isValid() ? TinyGPSPlus::cardinal(gps.course.deg()) : "*** ", 6);
+
+  unsigned long distanceKmToLondon =
+    (unsigned long)TinyGPSPlus::distanceBetween(
+      gps.location.lat(),
+      gps.location.lng(),
+      LONDON_LAT, 
+      LONDON_LON) / 1000;
+  printInt(distanceKmToLondon, gps.location.isValid(), 9);
+
+  double courseToLondon =
+    TinyGPSPlus::courseTo(
+      gps.location.lat(),
+      gps.location.lng(),
+      LONDON_LAT, 
+      LONDON_LON);
+
+  printFloat(courseToLondon, gps.location.isValid(), 7, 2);
+
+  const char *cardinalToLondon = TinyGPSPlus::cardinal(courseToLondon);
+
+  printStr(gps.location.isValid() ? cardinalToLondon : "*** ", 6);
+
+  printInt(gps.charsProcessed(), true, 6);
+  printInt(gps.sentencesWithFix(), true, 10);
+  printInt(gps.failedChecksum(), true, 9);
+  Serial.println();
+  
+  smartDelay(1000);
+
+  if (millis() > 5000 && gps.charsProcessed() < 10)
+    Serial.println(F("No GPS data received: check wiring"));
 }
